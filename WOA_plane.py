@@ -6,6 +6,16 @@ import io
 import os
 import sys
 import glob
+import urllib.request
+import subprocess
+import time
+
+# ==========================================
+# 0. 自動更新配置
+# ==========================================
+CURRENT_VERSION = "1.0.1"
+VERSION_URL = "https://raw.githubusercontent.com/F1026120/WOA-Profit-Analyzer/refs/heads/main/version.txt"
+EXE_URL = "https://github.com/F1026120/WOA-Profit-Analyzer/releases/download/v1.0.1/WOA_Profit_Analyzer.exe"
 
 # ==========================================
 # 1. 預載資料與常數
@@ -84,6 +94,9 @@ class ProfitAnalyzerApp:
 
         # 使用 after 延遲執行自動載入，讓主視窗先畫出來，進度視窗才能正確顯示在上方
         self.root.after(200, self.auto_load_csv_folder)
+        
+        # 啟動檢查更新 (延遲 1 秒執行以免卡住啟動)
+        self.root.after(1000, self.check_for_updates)
 
     def create_widgets(self):
         # --- 頂部控制區 ---
@@ -559,6 +572,60 @@ class ProfitAnalyzerApp:
         # 同步更新常用機型管理介面的表格
         if hasattr(self, 'fav_tree'):
             self.update_fav_table()
+
+    # ================= 更新邏輯 =================
+    def check_for_updates(self):
+        """檢查 GitHub 上是否有新版本"""
+        try:
+            # 使用 urllib 抓取遠端版本號
+            with urllib.request.urlopen(VERSION_URL, timeout=5) as response:
+                latest_version = response.read().decode('utf-8').strip()
+            
+            # 比較版本號 (簡單的字串比較，若更複雜可使用 packaging.version)
+            if latest_version > CURRENT_VERSION:
+                if messagebox.askyesno("更新提醒", f"發現新版本 {latest_version}！\n目前版本: {CURRENT_VERSION}\n是否立即下載更新？"):
+                    self.perform_update(latest_version)
+        except Exception as e:
+            # 靜默失敗，不干擾使用者正常使用
+            print(f"檢查更新失敗: {e}")
+
+    def perform_update(self, latest_version):
+        """執行更新流程"""
+        try:
+            new_exe = "WOA_Profit_Analyzer_new.exe"
+            
+            # 下載進度提示 (簡單版)
+            prog_win = tk.Toplevel(self.root)
+            prog_win.title("正在更新")
+            prog_win.geometry("300x100")
+            tk.Label(prog_win, text=f"正在下載版本 {latest_version}...\n請稍候").pack(pady=20)
+            prog_win.update()
+
+            # 實際下載 (這裡使用固定的 EXE_URL，若 Release URL 會變動則需另外解析)
+            # 注意: GitHub Release 的下載連結通常會帶有版本號，建議之後改為動態獲取
+            urllib.request.urlretrieve(EXE_URL, new_exe)
+            prog_win.destroy()
+
+            # 取得當前執行的檔名
+            current_exe = os.path.basename(sys.executable)
+            
+            # 建立批次檔處理檔案替換
+            # 邏輯：等主程式結束 -> 刪除舊檔 -> 改名新檔 -> 重新啟動
+            bat_content = f"""@echo off
+timeout /t 2 /nobreak > nul
+del "{current_exe}"
+ren "{new_exe}" "{current_exe}"
+start "" "{current_exe}"
+del update.bat
+"""
+            with open("update.bat", "w", encoding="cp950") as f:
+                f.write(bat_content)
+
+            # 啟動批次檔並結束程式
+            subprocess.Popen(["update.bat"], shell=True)
+            self.root.quit()
+        except Exception as e:
+            messagebox.showerror("更新失敗", f"更新過程中發生錯誤:\n{e}")
         
     def treeview_sort_column(self, tv, col, reverse):
         """點擊標題進行排序"""
