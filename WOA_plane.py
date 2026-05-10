@@ -13,9 +13,9 @@ import time
 # ==========================================
 # 0. 自動更新配置
 # ==========================================
-CURRENT_VERSION = "1.0.1"
+CURRENT_VERSION = "1.1.0"
 VERSION_URL = "https://raw.githubusercontent.com/F1026120/WOA-Profit-Analyzer/refs/heads/main/version.txt"
-EXE_URL = "https://github.com/F1026120/WOA-Profit-Analyzer/releases/download/v1.0.1/WOA_Profit_Analyzer.exe"
+EXE_URL = f"https://github.com/F1026120/WOA-Profit-Analyzer/releases/download/v{CURRENT_VERSION}/WOA_Profit_Analyzer.exe"
 
 # ==========================================
 # 1. 預載資料與常數
@@ -69,7 +69,7 @@ def clean_profit_value(val):
 class ProfitAnalyzerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("✈️ WoA 航線利潤與 XP 分析器 (離線桌面版)")
+        self.root.title(f"✈️ WoA 航線利潤與 XP 分析器 (v{CURRENT_VERSION})")
         self.root.geometry("1150x780")
         
         style = ttk.Style()
@@ -111,6 +111,8 @@ class ProfitAnalyzerApp:
         
         self.lbl_record_count = tk.Label(top_frame, text=f"航線: {len(self.db)} 筆 | 機型資料: {len(self.price_dict)} 筆", fg="gray")
         self.lbl_record_count.pack(side=tk.RIGHT, padx=10)
+        
+        tk.Label(top_frame, text=f"Version: {CURRENT_VERSION}", fg="#94a3b8", font=("Helvetica", 9)).pack(side=tk.RIGHT, padx=5)
 
         # --- 分頁管理區 ---
         self.notebook = ttk.Notebook(self.root)
@@ -118,14 +120,17 @@ class ProfitAnalyzerApp:
 
         self.tab1 = ttk.Frame(self.notebook)
         self.tab2 = ttk.Frame(self.notebook)
+        self.tab4 = ttk.Frame(self.notebook)
         self.tab3 = ttk.Frame(self.notebook)
 
         self.notebook.add(self.tab1, text="🌐 航線探索 (依機型找航線)")
         self.notebook.add(self.tab2, text="✈️ 選購指南 (依航線比機型)")
+        self.notebook.add(self.tab4, text="👑 玩家分站 (依目的地找航線)")
         self.notebook.add(self.tab3, text="⭐ 常用機型 (管理最愛)")
 
         self.create_tab1()
         self.create_tab2()
+        self.create_tab4()
         self.create_tab3()
 
     def create_tab1(self):
@@ -271,6 +276,61 @@ class ProfitAnalyzerApp:
         self.tree2.configure(yscroll=scrollbar2.set)
         self.tree2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar2.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def create_tab4(self):
+        # ================= Tab 4: 玩家分站 =================
+        filter_frame = tk.LabelFrame(self.tab4, text="篩選條件", padx=10, pady=10)
+        filter_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        tk.Label(filter_frame, text="📍 玩家機場 (目的地):").grid(row=0, column=0, padx=5, pady=5)
+        self.tab4_dest_var = tk.StringVar()
+        self.tab4_dest_cb = ttk.Combobox(filter_frame, textvariable=self.tab4_dest_var, state="readonly", width=15)
+        self.tab4_dest_cb.grid(row=0, column=1, padx=5, pady=5)
+        self.tab4_dest_cb.bind("<<ComboboxSelected>>", lambda e: self.apply_tab4_filters())
+        
+        self.tab4_fav_only_var = tk.BooleanVar(value=False)
+        self.tab4_fav_only_cb = ttk.Checkbutton(filter_frame, text="⭐ 只看常用機型", variable=self.tab4_fav_only_var, command=self.apply_tab4_filters)
+        self.tab4_fav_only_cb.grid(row=0, column=2, padx=20, pady=5)
+
+        stats_frame = tk.Frame(self.tab4, padx=10, pady=5)
+        stats_frame.pack(fill=tk.X)
+        
+        self.lbl_tab4_top = tk.Label(stats_frame, text="🏆 最佳航線: 無", font=("Helvetica", 14, "bold"), fg="#1e40af")
+        self.lbl_tab4_top.pack(side=tk.LEFT, padx=10)
+
+        table_frame = tk.Frame(self.tab4, padx=10, pady=10)
+        table_frame.pack(fill=tk.BOTH, expand=True)
+        
+        columns = ("rank", "hub", "aircraft", "dist", "seat", "xp", "profit", "roi")
+        self.tree4 = ttk.Treeview(table_frame, columns=columns, show="headings")
+        
+        tab4_headings = {
+            "rank": "排名", 
+            "hub": "出發地 (Hub)",
+            "aircraft": "機型 (Aircraft)", 
+            "dist": "距離(NM)", 
+            "seat": "推薦座位(E/B/F)", 
+            "xp": "Lv.10 XP", 
+            "profit": "淨利潤 ($)", 
+            "roi": "報酬率 (ROI)"
+        }
+        
+        for col, text in tab4_headings.items():
+            self.tree4.heading(col, text=text, command=lambda c=col: self.treeview_sort_column(self.tree4, c, False))
+            
+        self.tree4.column("rank", width=50, anchor=tk.CENTER)
+        self.tree4.column("hub", width=120, anchor=tk.CENTER)
+        self.tree4.column("aircraft", width=150, anchor=tk.W)
+        self.tree4.column("dist", width=80, anchor=tk.CENTER)
+        self.tree4.column("seat", width=120, anchor=tk.CENTER)
+        self.tree4.column("xp", width=80, anchor=tk.CENTER)
+        self.tree4.column("profit", width=120, anchor=tk.E)
+        self.tree4.column("roi", width=120, anchor=tk.E)
+        
+        scrollbar4 = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree4.yview)
+        self.tree4.configure(yscroll=scrollbar4.set)
+        self.tree4.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar4.pack(side=tk.RIGHT, fill=tk.Y)
 
     def create_tab3(self):
         # ================= Tab 3: 常用機型管理 =================
@@ -569,6 +629,16 @@ class ProfitAnalyzerApp:
             self.tab2_hub_var.set(hubs[0])
         self.on_tab2_hub_change()
         
+        # 更新 Tab 4 玩家分站選單
+        p_dests = sorted([d for d in self.db['dest'].unique().tolist() if d in PLAYABLE_AIRPORTS])
+        self.tab4_dest_cb['values'] = p_dests
+        if p_dests:
+            if self.tab4_dest_var.get() not in p_dests:
+                self.tab4_dest_var.set(p_dests[0])
+        else:
+            self.tab4_dest_var.set('')
+        self.apply_tab4_filters()
+        
         # 同步更新常用機型管理介面的表格
         if hasattr(self, 'fav_tree'):
             self.update_fav_table()
@@ -799,6 +869,48 @@ del update.bat
                 roi_str = "-"
             
             self.tree2.insert("", tk.END, values=(i + 1, ac, row['dist'], seat_str, xp_val, profit_str, roi_str))
+
+    # ================= Tab 4 邏輯 =================
+    def apply_tab4_filters(self):
+        for item in self.tree4.get_children():
+            self.tree4.delete(item)
+            
+        selected_dest = self.tab4_dest_var.get()
+        if not selected_dest or self.db.empty:
+            self.lbl_tab4_top.config(text="🏆 最佳航線: 無")
+            return
+            
+        df_filtered = self.db[self.db['dest'] == selected_dest].copy()
+        
+        # 處理常用機型過濾
+        if self.tab4_fav_only_var.get():
+            df_filtered = df_filtered[df_filtered['aircraft'].isin(self.favorites)]
+            
+        df_filtered = df_filtered.sort_values(by='profit', ascending=False).reset_index(drop=True)
+
+        if df_filtered.empty:
+            self.lbl_tab4_top.config(text="🏆 最佳航線: 無資料")
+            return
+
+        best = df_filtered.iloc[0]
+        self.lbl_tab4_top.config(text=f"🏆 最佳出發點: {best['hub']} (${int(best['profit']):,})")
+
+        for i, row in df_filtered.iterrows():
+            ac = row['aircraft']
+            profit_val = row['profit']
+            seat_str = f"{row['e'] or 0} / {row['b'] or 0} / {row['f'] or 0}"
+            profit_str = f"${int(profit_val):,}"
+            xp_val = self.xp_dict.get(ac, '-')
+            
+            # 計算報酬率 (ROI)
+            price = self.price_dict.get(ac)
+            if price and price > 0:
+                roi_val = (profit_val / price) * 100
+                roi_str = f"{roi_val:.4f}%"
+            else:
+                roi_str = "-"
+            
+            self.tree4.insert("", tk.END, values=(i + 1, row['hub'], ac, row['dist'], seat_str, xp_val, profit_str, roi_str))
 
 if __name__ == "__main__":
     root = tk.Tk()
