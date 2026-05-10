@@ -660,42 +660,27 @@ class ProfitAnalyzerApp:
             print(f"檢查更新失敗: {e}")
 
     def perform_update(self, latest_version):
-        """執行更新流程"""
+        """執行更新流程：下載新版本並以版本號命名"""
         try:
-            new_exe = "WOA_Profit_Analyzer_new.exe"
+            # 以版本號命名新檔案
+            new_exe_name = f"WOA_Profit_Analyzer_v{latest_version}.exe"
             
-            # 下載進度提示 (簡單版)
+            # 下載進度提示
             prog_win = tk.Toplevel(self.root)
-            prog_win.title("正在更新")
-            prog_win.geometry("300x100")
-            tk.Label(prog_win, text=f"正在下載版本 {latest_version}...\n請稍候").pack(pady=20)
+            prog_win.title("正在下載更新")
+            prog_win.geometry("350x120")
+            tk.Label(prog_win, text=f"正在下載新版本 v{latest_version}...\n下載完成後請手動開啟新程式。", 
+                     font=("Helvetica", 10)).pack(pady=20)
             prog_win.update()
 
-            # 實際下載 (這裡使用固定的 EXE_URL，若 Release URL 會變動則需另外解析)
-            # 注意: GitHub Release 的下載連結通常會帶有版本號，建議之後改為動態獲取
-            urllib.request.urlretrieve(EXE_URL, new_exe)
+            # 執行下載
+            urllib.request.urlretrieve(EXE_URL, new_exe_name)
             prog_win.destroy()
 
-            # 取得當前執行的檔名
-            current_exe = os.path.basename(sys.executable)
+            messagebox.showinfo("下載完成", f"新版本已下載完成！\n\n檔名：{new_exe_name}\n\n請關閉目前視窗並手動啟動新版本即可。")
             
-            # 建立批次檔處理檔案替換
-            # 邏輯：等主程式結束 -> 刪除舊檔 -> 改名新檔 -> 重新啟動
-            bat_content = f"""@echo off
-timeout /t 2 /nobreak > nul
-del "{current_exe}"
-ren "{new_exe}" "{current_exe}"
-start "" "{current_exe}"
-del update.bat
-"""
-            with open("update.bat", "w", encoding="cp950") as f:
-                f.write(bat_content)
-
-            # 啟動批次檔並結束程式
-            subprocess.Popen(["update.bat"], shell=True)
-            self.root.quit()
         except Exception as e:
-            messagebox.showerror("更新失敗", f"更新過程中發生錯誤:\n{e}")
+            messagebox.showerror("下載失敗", f"下載過程中發生錯誤:\n{e}")
         
     def treeview_sort_column(self, tv, col, reverse):
         """點擊標題進行排序"""
