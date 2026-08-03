@@ -13,7 +13,7 @@ import time
 # ==========================================
 # 0. 自動更新配置
 # ==========================================
-CURRENT_VERSION = "1.1.0"
+CURRENT_VERSION = "1.2.0"
 VERSION_URL = "https://raw.githubusercontent.com/F1026120/WOA-Profit-Analyzer/refs/heads/main/version.txt"
 EXE_URL = f"https://github.com/F1026120/WOA-Profit-Analyzer/releases/download/v{CURRENT_VERSION}/WOA_Profit_Analyzer.exe"
 
@@ -52,16 +52,39 @@ INITIAL_PRICE_INFO = {
 # 2. 輔助函數
 # ==========================================
 def clean_profit_value(val):
+    """
+    清理與轉換 CSV 中的利潤數值。
+    支援將帶有小數點的浮點數字串（例如 '3239.63'）轉換為整數，
+    並自動過濾 Excel 錯誤訊息（如 #DIV/0!, #VALUE!, #Underload! 等）。
+    """
     if pd.isna(val):
         return None
     val_str = str(val)
-    if '#DIV/0!' in val_str or '#VALUE!' in val_str:
+    # 過濾常見的 Excel/試算表計算錯誤與無效狀態字串
+    if any(err in val_str for err in ['#DIV/0!', '#VALUE!', '#Underload!', '#REF!', '#N/A']):
         return None
+    # 去除非數字、非負號與非小數點之符號
     cleaned = re.sub(r'[^0-9.-]', '', val_str)
     try:
-        return int(cleaned)
-    except ValueError:
+        # 先轉成 float 再四捨五入轉成 int，避免直接 int("3239.63") 拋出 ValueError 導致整個 CSV 檔案讀取失敗
+        return int(round(float(cleaned)))
+    except (ValueError, TypeError):
         return None
+
+def clean_seat_str(val):
+    """
+    清理座位數值字串。
+    去除小數點尾數（例如 '244.0' 轉為 '244'）與空白或 nan 字串。
+    """
+    if pd.isna(val):
+        return ''
+    s = str(val).strip()
+    if not s or s.lower() == 'nan':
+        return ''
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s
+
 
 # ==========================================
 # 3. 桌面應用程式主體 (Tkinter)
@@ -517,7 +540,7 @@ class ProfitAnalyzerApp:
                     for col in df_csv.columns:
                         if col == 'from': col_map['hub'] = col
                         elif col == 'to': col_map['dest'] = col
-                        elif col == 'airport': col_map['city'] = col
+                        elif col in ['airport', 'destination', 'city']: col_map['city'] = col # 支援 airport、destination、city 欄位名稱
                         elif col == 'country': col_map['country'] = col
                         elif col in ['distance', 'dist']: col_map['dist'] = col
                         elif col in ['e', 'economy']: col_map['e'] = col
@@ -534,7 +557,9 @@ class ProfitAnalyzerApp:
                     for _, row in df_csv.iterrows():
                         hub = str(row[col_map['hub']]).strip()
                         dest = str(row[col_map['dest']]).strip()
-                        if not hub or not dest or pd.isna(row[col_map['hub']]): continue
+                        # 判斷無效或空白出發地/目的地
+                        if not hub or not dest or pd.isna(row[col_map['hub']]) or hub.lower() == 'nan' or dest.lower() == 'nan': 
+                            continue
                             
                         profit = clean_profit_value(row[col_map['profit']])
                         if profit is None: continue
@@ -546,11 +571,13 @@ class ProfitAnalyzerApp:
                             }
                             
                         dist = row[col_map['dist']] if 'dist' in col_map else 0
-                        dist = int(re.sub(r'[^0-9]', '', str(dist))) if pd.notna(dist) else 0
+                        dist_str = re.sub(r'[^0-9]', '', str(dist)) if pd.notna(dist) else ''
+                        dist = int(dist_str) if dist_str else 0
                         
-                        e_seats = str(row[col_map['e']]).strip() if 'e' in col_map and pd.notna(row[col_map['e']]) else ''
-                        b_seats = str(row[col_map['b']]).strip() if 'b' in col_map and pd.notna(row[col_map['b']]) else ''
-                        f_seats = str(row[col_map['f']]).strip() if 'f' in col_map and pd.notna(row[col_map['f']]) else ''
+                        # 清理並轉換經濟艙、商務艙、頭等艙座位數值
+                        e_seats = clean_seat_str(row[col_map['e']]) if 'e' in col_map else ''
+                        b_seats = clean_seat_str(row[col_map['b']]) if 'b' in col_map else ''
+                        f_seats = clean_seat_str(row[col_map['f']]) if 'f' in col_map else ''
 
                         new_records.append({
                             'hub': hub, 'dest': dest, 'aircraft': aircraft_code,
