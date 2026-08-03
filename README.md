@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Version](https://img.shields.io/badge/Version-1.2.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-1.2.1-orange.svg)
 
 ## ✨ 核心功能
 
@@ -17,6 +17,10 @@
 *   **🔄 自動更新**：程式啟動時自動檢查 GitHub 新版本，確保功能與時俱進。
 
 ## 📋 更新日誌 (Changelog)
+
+### v1.2.1
+*   🔧 **修復自動更新下載舊版本問題**：
+    *   修正舊版本執行自動更新時下載連結硬編碼舊版號的 Bug，改為動態根據遠端版本號拼接下載 URL。
 
 ### v1.2.0
 *   🐛 **修復 CSV 讀取失敗問題**：

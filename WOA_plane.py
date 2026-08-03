@@ -13,9 +13,11 @@ import time
 # ==========================================
 # 0. 自動更新配置
 # ==========================================
-CURRENT_VERSION = "1.2.0"
+CURRENT_VERSION = "1.2.1"
 VERSION_URL = "https://raw.githubusercontent.com/F1026120/WOA-Profit-Analyzer/refs/heads/main/version.txt"
-EXE_URL = f"https://github.com/F1026120/WOA-Profit-Analyzer/releases/download/v{CURRENT_VERSION}/WOA_Profit_Analyzer.exe"
+# Releases 基本下載路徑，版本號會由 perform_update 根據遠端 latest_version 動態帶入
+RELEASE_BASE_URL = "https://github.com/F1026120/WOA-Profit-Analyzer/releases/download"
+
 
 # ==========================================
 # 1. 預載資料與常數
@@ -687,9 +689,11 @@ class ProfitAnalyzerApp:
             print(f"檢查更新失敗: {e}")
 
     def perform_update(self, latest_version):
-        """執行更新流程：下載新版本並以版本號命名"""
+        """執行更新流程：根據遠端傳入的 latest_version 下載新版本 exe 檔案"""
         try:
-            # 以版本號命名新檔案
+            # 動態建立最新版本的 GitHub Release 下載網址（避免舊版本誤下載到自己舊版的 EXE_URL）
+            download_url = f"{RELEASE_BASE_URL}/v{latest_version}/WOA_Profit_Analyzer.exe"
+            # 以新版本號命名本地儲存之檔案
             new_exe_name = f"WOA_Profit_Analyzer_v{latest_version}.exe"
             
             # 下載進度提示
@@ -700,8 +704,8 @@ class ProfitAnalyzerApp:
                      font=("Helvetica", 10)).pack(pady=20)
             prog_win.update()
 
-            # 執行下載
-            urllib.request.urlretrieve(EXE_URL, new_exe_name)
+            # 執行下載最新版本的執行檔
+            urllib.request.urlretrieve(download_url, new_exe_name)
             prog_win.destroy()
 
             messagebox.showinfo("下載完成", f"新版本已下載完成！\n\n檔名：{new_exe_name}\n\n請關閉目前視窗並手動啟動新版本即可。")
