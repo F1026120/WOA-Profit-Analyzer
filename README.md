@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Version](https://img.shields.io/badge/Version-1.1.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-1.2.0-orange.svg)
 
 ## ✨ 核心功能
 
@@ -15,6 +15,17 @@
 *   **⭐ 常用機型管理**：支援最愛機型設定，提供雙擊切換與快速篩選功能。
 *   **📊 互動式排序**：表格標題支援點擊排序（利潤、距離、ROI、XP 等）。
 *   **🔄 自動更新**：程式啟動時自動檢查 GitHub 新版本，確保功能與時俱進。
+
+## 📋 更新日誌 (Changelog)
+
+### v1.2.0
+*   🐛 **修復 CSV 讀取失敗問題**：
+    *   支援帶有小數點的浮點數格式利潤轉換（如 `3239.63...` 自動四捨五入為整數），解決部分機型 CSV（如 `A21N.csv`）讀取失敗的問題。
+    *   新增 `Destination` 欄位對應至目的地城市名稱。
+    *   自動清理座位配置格式（去除 `.0` 尾數，如 `244.0` 格式化為 `244`）。
+    *   強化試算表錯誤值過濾（如 `#Underload!`, `#DIV/0!`, `#VALUE!` 等）。
+
+---
 
 ## 🚀 如何開始
 
@@ -32,8 +43,9 @@
 
 程式支援 WoA 社群常用的 CSV 導出格式，請確保 CSV 包含以下關鍵欄位：
 *   `From`, `To` (出發與目的地)
+*   `Destination` / `Airport` (目的地城市名稱)
 *   `Distance` (距離)
-*   `Net Round Trip Profit` (淨利潤)
+*   `Profit` / `Net Round Trip Profit` (淨利潤)
 *   `Capacity (E/B/F)` (座位配置)
 
 ## 🛠️ 開發與建置
@@ -50,7 +62,7 @@
    ```
 3. 打包為 EXE：
    ```bash
-   pyinstaller --onefile --noconsole --name "WOA_Profit_Analyzer" WOA_plane.py
+   python -m PyInstaller --clean --noconfirm WOA_Profit_Analyzer.spec
    ```
 
 ## 📝 授權
