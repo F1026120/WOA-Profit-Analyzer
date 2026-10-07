@@ -13,7 +13,7 @@ import time
 # ==========================================
 # 0. 自動更新配置
 # ==========================================
-CURRENT_VERSION = "1.2.1"
+CURRENT_VERSION = "1.2.2"
 VERSION_URL = "https://raw.githubusercontent.com/F1026120/WOA-Profit-Analyzer/refs/heads/main/version.txt"
 # Releases 基本下載路徑，版本號會由 perform_update 根據遠端 latest_version 動態帶入
 RELEASE_BASE_URL = "https://github.com/F1026120/WOA-Profit-Analyzer/releases/download"
@@ -24,7 +24,7 @@ RELEASE_BASE_URL = "https://github.com/F1026120/WOA-Profit-Analyzer/releases/dow
 # ==========================================
 PLAYABLE_AIRPORTS = {
     'INN', 'BRI', 'PRG', 'IAD', 'NGO', 'SAN', 'MCT', 'LEJ', 
-    'SXM', 'LHR', 'SYD', 'BKK', 'MSY', 'GRU', 'SCL', 'CNN', 'HKG'
+    'SXM', 'LHR', 'SYD', 'BKK', 'MSY', 'GRU', 'SCL', 'CNN', 'HKG','ZRH'
 }
 
 INITIAL_DATA = [
