@@ -9,12 +9,17 @@ import glob
 import urllib.request
 import subprocess
 import time
+import threading
+import json
+import base64
 
 # ==========================================
-# 0. 自動更新配置
+# 0. 版本更新配置
 # ==========================================
-CURRENT_VERSION = "1.2.2"
+CURRENT_VERSION = "1.2.3"
 VERSION_URL = "https://raw.githubusercontent.com/F1026120/WOA-Profit-Analyzer/refs/heads/main/version.txt"
+# GitHub API 路徑 (可繞過 raw.githubusercontent.com 的 Fastly CDN 300 秒快取，即時取得最新內容)
+GITHUB_API_VERSION_URL = "https://api.github.com/repos/F1026120/WOA-Profit-Analyzer/contents/version.txt"
 # Releases 基本下載路徑，版本號會由 perform_update 根據遠端 latest_version 動態帶入
 RELEASE_BASE_URL = "https://github.com/F1026120/WOA-Profit-Analyzer/releases/download"
 
@@ -125,19 +130,34 @@ class ProfitAnalyzerApp:
 
     def create_widgets(self):
         # --- 頂部控制區 ---
-        top_frame = tk.Frame(self.root, padx=10, pady=10)
-        top_frame.pack(fill=tk.X)
+        self.top_frame = tk.Frame(self.root, padx=10, pady=10)
+        self.top_frame.pack(fill=tk.X)
         
-        upload_btn = tk.Button(top_frame, text="📂 手動上傳 CSV", bg="#2563eb", fg="white", font=("Helvetica", 11, "bold"), command=self.upload_csv)
+        upload_btn = tk.Button(self.top_frame, text="📂 手動上傳 CSV", bg="#2563eb", fg="white", font=("Helvetica", 11, "bold"), command=self.upload_csv)
         upload_btn.pack(side=tk.LEFT, padx=5)
         
-        clear_btn = tk.Button(top_frame, text="🗑️ 清空資料庫", bg="#dc2626", fg="white", font=("Helvetica", 11, "bold"), command=self.clear_db)
+        clear_btn = tk.Button(self.top_frame, text="🗑️ 清空資料庫", bg="#dc2626", fg="white", font=("Helvetica", 11, "bold"), command=self.clear_db)
         clear_btn.pack(side=tk.LEFT, padx=5)
+
+        # 下載最新版本按鈕 (預設隱藏，若檢查到有新版才顯示，配色使用醒目鮮橘色與白字粗體)
+        self.btn_update = tk.Button(
+            self.top_frame,
+            text="🚀 下載最新版本",
+            bg="#f97316",
+            fg="white",
+            activebackground="#ea580c",
+            activeforeground="white",
+            font=("Helvetica", 11, "bold"),
+            relief=tk.RAISED,
+            bd=2,
+            cursor="hand2"
+        )
+        # 初始不顯示 pack，等待 check_for_updates 偵測到新版本時顯示
         
-        self.lbl_record_count = tk.Label(top_frame, text=f"航線: {len(self.db)} 筆 | 機型資料: {len(self.price_dict)} 筆", fg="gray")
+        self.lbl_record_count = tk.Label(self.top_frame, text=f"航線: {len(self.db)} 筆 | 機型資料: {len(self.price_dict)} 筆", fg="gray")
         self.lbl_record_count.pack(side=tk.RIGHT, padx=10)
         
-        tk.Label(top_frame, text=f"Version: {CURRENT_VERSION}", fg="#94a3b8", font=("Helvetica", 9)).pack(side=tk.RIGHT, padx=5)
+        tk.Label(self.top_frame, text=f"Version: {CURRENT_VERSION}", fg="#94a3b8", font=("Helvetica", 9)).pack(side=tk.RIGHT, padx=5)
 
         # --- 分頁管理區 ---
         self.notebook = ttk.Notebook(self.root)
@@ -672,46 +692,146 @@ class ProfitAnalyzerApp:
         if hasattr(self, 'fav_tree'):
             self.update_fav_table()
 
-    # ================= 更新邏輯 =================
-    def check_for_updates(self):
-        """檢查 GitHub 上是否有新版本"""
+    # ================= 版本檢查與手動更新邏輯 =================
+    def _is_newer_version(self, latest, current):
+        """
+        比較版本號大小。
+        優先嘗試使用 packaging.version，若環境無該模組則採用語義化版本 tuple 比對。
+        """
         try:
-            # 使用 urllib 抓取遠端版本號
-            with urllib.request.urlopen(VERSION_URL, timeout=5) as response:
-                latest_version = response.read().decode('utf-8').strip()
-            
-            # 比較版本號 (簡單的字串比較，若更複雜可使用 packaging.version)
-            if latest_version > CURRENT_VERSION:
-                if messagebox.askyesno("更新提醒", f"發現新版本 {latest_version}！\n目前版本: {CURRENT_VERSION}\n是否立即下載更新？"):
-                    self.perform_update(latest_version)
-        except Exception as e:
-            # 靜默失敗，不干擾使用者正常使用
-            print(f"檢查更新失敗: {e}")
+            from packaging import version
+            return version.parse(latest) > version.parse(current)
+        except Exception:
+            try:
+                latest_parts = [int(p) for p in re.findall(r'\d+', latest)]
+                current_parts = [int(p) for p in re.findall(r'\d+', current)]
+                return latest_parts > current_parts
+            except Exception:
+                return latest > current
+
+    def check_for_updates(self):
+        """
+        在背景線程檢查 GitHub 是否有新版本，避免啟動時網路延遲造成介面卡頓。
+        不執行自動更新或彈窗打擾，若有最新版則在介面顯示醒目的下載按鈕。
+        為避免 raw.githubusercontent.com 快取 (通常約 300 秒)，優先使用 GitHub Contents API 即時取得內容。
+        """
+        def _fetch_remote_version():
+            # 優先方式：透過 GitHub API 取得 contents，可即時反映無快取
+            try:
+                api_req = urllib.request.Request(
+                    GITHUB_API_VERSION_URL,
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                )
+                with urllib.request.urlopen(api_req, timeout=5) as response:
+                    api_data = json.loads(response.read().decode('utf-8'))
+                    if 'content' in api_data:
+                        ver_text = base64.b64decode(api_data['content']).decode('utf-8').strip()
+                        if ver_text:
+                            return ver_text
+            except Exception:
+                pass
+
+            # 備援方式：直接抓取 raw.githubusercontent.com
+            req = urllib.request.Request(
+                VERSION_URL,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                return response.read().decode('utf-8').strip()
+
+        def _worker():
+            try:
+                latest_version = _fetch_remote_version()
+                # 比對遠端版本是否大於目前版本
+                if latest_version and self._is_newer_version(latest_version, CURRENT_VERSION):
+                    # 在主線程中顯示醒目的下載按鈕
+                    self.root.after(0, lambda: self._show_update_button(latest_version))
+            except Exception as e:
+                # 檢查更新失敗時靜默記錄，不影響使用者操作
+                print(f"檢查更新失敗: {e}")
+
+        # 啟動守護線程進行檢查
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_update_button(self, latest_version):
+        """
+        當檢測到最新版時，在頂部控制區顯示醒目的下載按鈕。
+        按鈕文字標記新版本號，使用醒目的漸層鮮橘色並帶有閃爍或提示效果。
+        """
+        self.btn_update.config(
+            text=f"🔔 發現新版本 v{latest_version} (點此下載)",
+            command=lambda: self.perform_update(latest_version)
+        )
+        # 放置在頂部控制區左側 (手動上傳與清空按鈕旁邊)
+        self.btn_update.pack(side=tk.LEFT, padx=8)
 
     def perform_update(self, latest_version):
-        """執行更新流程：根據遠端傳入的 latest_version 下載新版本 exe 檔案"""
+        """
+        使用者主動點擊按鈕後才執行下載最新版本流程。
+        下載最新版本的 exe 檔案並提供清楚的進度與完成提示。
+        """
+        # 下載前先確認
+        if not messagebox.askyesno("確認下載", f"即將下載最新版本 v{latest_version}。\n目前版本為 v{CURRENT_VERSION}。\n是否確定開始下載？"):
+            return
+
         try:
-            # 動態建立最新版本的 GitHub Release 下載網址（避免舊版本誤下載到自己舊版的 EXE_URL）
             download_url = f"{RELEASE_BASE_URL}/v{latest_version}/WOA_Profit_Analyzer.exe"
-            # 以新版本號命名本地儲存之檔案
             new_exe_name = f"WOA_Profit_Analyzer_v{latest_version}.exe"
             
-            # 下載進度提示
+            # 建立下載進度提示視窗
             prog_win = tk.Toplevel(self.root)
-            prog_win.title("正在下載更新")
-            prog_win.geometry("350x120")
-            tk.Label(prog_win, text=f"正在下載新版本 v{latest_version}...\n下載完成後請手動開啟新程式。", 
-                     font=("Helvetica", 10)).pack(pady=20)
+            prog_win.title("下載最新版本")
+            prog_win.geometry("380x140")
+            prog_win.resizable(False, False)
+            prog_win.transient(self.root)
+            prog_win.grab_set()
+
+            lbl_status = tk.Label(
+                prog_win, 
+                text=f"正在下載新版本 v{latest_version}...\n請稍候...", 
+                font=("Helvetica", 10),
+                pady=15
+            )
+            lbl_status.pack()
+
+            prog_bar = ttk.Progressbar(prog_win, mode='indeterminate', length=280)
+            prog_bar.pack(pady=5)
+            prog_bar.start(10)
             prog_win.update()
 
-            # 執行下載最新版本的執行檔
-            urllib.request.urlretrieve(download_url, new_exe_name)
-            prog_win.destroy()
+            def _download_thread():
+                try:
+                    # 執行下載
+                    urllib.request.urlretrieve(download_url, new_exe_name)
+                    # 下載成功後回主線程通知
+                    self.root.after(0, lambda: on_download_success(new_exe_name, latest_version))
+                except Exception as e:
+                    self.root.after(0, lambda: on_download_fail(e))
 
-            messagebox.showinfo("下載完成", f"新版本已下載完成！\n\n檔名：{new_exe_name}\n\n請關閉目前視窗並手動啟動新版本即可。")
-            
+            def on_download_success(exe_path, ver):
+                prog_bar.stop()
+                prog_win.destroy()
+                # 下載完成後更新按鈕文字為已下載
+                self.btn_update.config(
+                    text=f"✅ 已下載 v{ver} ({exe_path})",
+                    bg="#16a34a", # 轉為綠色
+                    activebackground="#15803d"
+                )
+                messagebox.showinfo(
+                    "下載完成", 
+                    f"🎉 新版本 v{ver} 已下載完成！\n\n檔案名稱：{exe_path}\n儲存目錄：{os.path.abspath(exe_path)}\n\n請關閉目前程式並執行新版本即可。"
+                )
+
+            def on_download_fail(err):
+                prog_bar.stop()
+                prog_win.destroy()
+                messagebox.showerror("下載失敗", f"下載最新版本時發生錯誤:\n{err}")
+
+            # 在背景線程下載，避免主介面反白或凍結
+            threading.Thread(target=_download_thread, daemon=True).start()
+
         except Exception as e:
-            messagebox.showerror("下載失敗", f"下載過程中發生錯誤:\n{e}")
+            messagebox.showerror("啟動下載失敗", f"無法啟動下載流程:\n{e}")
         
     def treeview_sort_column(self, tv, col, reverse):
         """點擊標題進行排序"""
