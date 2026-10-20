@@ -16,7 +16,7 @@ import base64
 # ==========================================
 # 0. 版本更新配置
 # ==========================================
-CURRENT_VERSION = "1.2.3"
+CURRENT_VERSION = "1.3.0"
 VERSION_URL = "https://raw.githubusercontent.com/F1026120/WOA-Profit-Analyzer/refs/heads/main/version.txt"
 # GitHub API 路徑 (可繞過 raw.githubusercontent.com 的 Fastly CDN 300 秒快取，即時取得最新內容)
 GITHUB_API_VERSION_URL = "https://api.github.com/repos/F1026120/WOA-Profit-Analyzer/contents/version.txt"
@@ -92,6 +92,24 @@ def clean_seat_str(val):
         s = s[:-2]
     return s
 
+def calculate_estimated_sp(sp_base_info, distance):
+    """
+    計算預估 SP 收益：
+    根據機型規格 (客機/貨機、地勤作業秒數、最大載客數或最大貨運量) 以及當趟飛行距離 (NM) 計算。
+    客機公式: 0.457145 * (Maximum Seats + 0.171 * (Handling Time (s)) + 6.96837) + (0.1367 * 飛行距離(NM))
+    貨機公式: 0.00466658 * (Cargo (kg) + 15.4 * (Handling Time (s)) + 10.1115) + (0.1367 * 飛行距離(NM))
+    最後結果取四捨五入整數。
+    """
+    if not sp_base_info:
+        return None
+    try:
+        base_val = sp_base_info.get('base_sp', 0.0)
+        dist_val = float(distance) if distance else 0.0
+        total_sp = base_val + (0.1367 * dist_val)
+        return int(round(total_sp))
+    except (ValueError, TypeError):
+        return None
+
 
 # ==========================================
 # 3. 桌面應用程式主體 (Tkinter)
@@ -100,7 +118,7 @@ class ProfitAnalyzerApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"✈️ WoA 航線利潤與 XP 分析器 (v{CURRENT_VERSION})")
-        self.root.geometry("1150x780")
+        self.root.geometry("1200x780")
         
         style = ttk.Style()
         style.theme_use('clam')
@@ -112,6 +130,7 @@ class ProfitAnalyzerApp:
         self.dest_info = INITIAL_DEST_INFO.copy()
         self.xp_dict = {} # 存放機型對應的 XP 資料
         self.price_dict = INITIAL_PRICE_INFO.copy() # 存放機型對應的 Unit Price
+        self.sp_dict = {} # 存放機型對應的 SP 基準計算參數 (base_sp, load_type, seats/cargo, handling_sec)
         self.favorites = set() # 存放最愛的機型代碼
         self.fav_file = "favorites.txt"
         self.load_favorites()
@@ -224,13 +243,16 @@ class ProfitAnalyzerApp:
         self.lbl_top_xp = tk.Label(stats_frame, text="✨ T10 XP: -", font=("Helvetica", 14, "bold"), fg="#7c3aed")
         self.lbl_top_xp.pack(side=tk.LEFT, padx=10)
 
+        self.lbl_top_sp = tk.Label(stats_frame, text="⭐ 預估 SP: -", font=("Helvetica", 14, "bold"), fg="#ea580c")
+        self.lbl_top_sp.pack(side=tk.LEFT, padx=10)
+
         self.lbl_top_roi = tk.Label(stats_frame, text="📈 ROI: -", font=("Helvetica", 14, "bold"), fg="#0891b2")
         self.lbl_top_roi.pack(side=tk.LEFT, padx=10)
 
         table_frame = tk.Frame(self.tab1, padx=10, pady=10)
         table_frame.pack(fill=tk.BOTH, expand=True)
         
-        columns = ("rank", "dest", "dist", "seat", "xp", "profit", "roi")
+        columns = ("rank", "dest", "dist", "seat", "xp", "sp", "profit", "roi")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
         
         tab1_headings = {
@@ -239,6 +261,7 @@ class ProfitAnalyzerApp:
             "dist": "距離(NM)", 
             "seat": "推薦座位(E/B/F)", 
             "xp": "Lv.10 XP", 
+            "sp": "預估 SP",
             "profit": "淨利潤 ($)", 
             "roi": "報酬率 (ROI)"
         }
@@ -247,12 +270,13 @@ class ProfitAnalyzerApp:
             self.tree.heading(col, text=text, command=lambda c=col: self.treeview_sort_column(self.tree, c, False))
             
         self.tree.column("rank", width=50, anchor=tk.CENTER)
-        self.tree.column("dest", width=300, anchor=tk.W)
-        self.tree.column("dist", width=80, anchor=tk.CENTER)
-        self.tree.column("seat", width=130, anchor=tk.CENTER)
-        self.tree.column("xp", width=80, anchor=tk.CENTER)
-        self.tree.column("profit", width=120, anchor=tk.E)
-        self.tree.column("roi", width=120, anchor=tk.E)
+        self.tree.column("dest", width=280, anchor=tk.W)
+        self.tree.column("dist", width=75, anchor=tk.CENTER)
+        self.tree.column("seat", width=120, anchor=tk.CENTER)
+        self.tree.column("xp", width=75, anchor=tk.CENTER)
+        self.tree.column("sp", width=75, anchor=tk.CENTER)
+        self.tree.column("profit", width=110, anchor=tk.E)
+        self.tree.column("roi", width=110, anchor=tk.E)
         
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
@@ -293,7 +317,7 @@ class ProfitAnalyzerApp:
         table_frame = tk.Frame(self.tab2, padx=10, pady=10)
         table_frame.pack(fill=tk.BOTH, expand=True)
         
-        columns = ("rank", "aircraft", "dist", "seat", "xp", "profit", "roi")
+        columns = ("rank", "aircraft", "dist", "seat", "xp", "sp", "profit", "roi")
         self.tree2 = ttk.Treeview(table_frame, columns=columns, show="headings")
         
         tab2_headings = {
@@ -302,6 +326,7 @@ class ProfitAnalyzerApp:
             "dist": "距離(NM)", 
             "seat": "推薦座位(E/B/F)", 
             "xp": "Lv.10 XP", 
+            "sp": "預估 SP",
             "profit": "淨利潤 ($)", 
             "roi": "報酬率 (ROI)"
         }
@@ -310,12 +335,13 @@ class ProfitAnalyzerApp:
             self.tree2.heading(col, text=text, command=lambda c=col: self.treeview_sort_column(self.tree2, c, False))
             
         self.tree2.column("rank", width=50, anchor=tk.CENTER)
-        self.tree2.column("aircraft", width=180, anchor=tk.W)
-        self.tree2.column("dist", width=80, anchor=tk.CENTER)
+        self.tree2.column("aircraft", width=160, anchor=tk.W)
+        self.tree2.column("dist", width=75, anchor=tk.CENTER)
         self.tree2.column("seat", width=120, anchor=tk.CENTER)
-        self.tree2.column("xp", width=80, anchor=tk.CENTER)
-        self.tree2.column("profit", width=120, anchor=tk.E)
-        self.tree2.column("roi", width=120, anchor=tk.E)
+        self.tree2.column("xp", width=75, anchor=tk.CENTER)
+        self.tree2.column("sp", width=75, anchor=tk.CENTER)
+        self.tree2.column("profit", width=110, anchor=tk.E)
+        self.tree2.column("roi", width=110, anchor=tk.E)
         
         scrollbar2 = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree2.yview)
         self.tree2.configure(yscroll=scrollbar2.set)
@@ -346,7 +372,7 @@ class ProfitAnalyzerApp:
         table_frame = tk.Frame(self.tab4, padx=10, pady=10)
         table_frame.pack(fill=tk.BOTH, expand=True)
         
-        columns = ("rank", "hub", "aircraft", "dist", "seat", "xp", "profit", "roi")
+        columns = ("rank", "hub", "aircraft", "dist", "seat", "xp", "sp", "profit", "roi")
         self.tree4 = ttk.Treeview(table_frame, columns=columns, show="headings")
         
         tab4_headings = {
@@ -356,6 +382,7 @@ class ProfitAnalyzerApp:
             "dist": "距離(NM)", 
             "seat": "推薦座位(E/B/F)", 
             "xp": "Lv.10 XP", 
+            "sp": "預估 SP",
             "profit": "淨利潤 ($)", 
             "roi": "報酬率 (ROI)"
         }
@@ -364,13 +391,14 @@ class ProfitAnalyzerApp:
             self.tree4.heading(col, text=text, command=lambda c=col: self.treeview_sort_column(self.tree4, c, False))
             
         self.tree4.column("rank", width=50, anchor=tk.CENTER)
-        self.tree4.column("hub", width=120, anchor=tk.CENTER)
-        self.tree4.column("aircraft", width=150, anchor=tk.W)
-        self.tree4.column("dist", width=80, anchor=tk.CENTER)
-        self.tree4.column("seat", width=120, anchor=tk.CENTER)
-        self.tree4.column("xp", width=80, anchor=tk.CENTER)
-        self.tree4.column("profit", width=120, anchor=tk.E)
-        self.tree4.column("roi", width=120, anchor=tk.E)
+        self.tree4.column("hub", width=90, anchor=tk.CENTER)
+        self.tree4.column("aircraft", width=130, anchor=tk.W)
+        self.tree4.column("dist", width=75, anchor=tk.CENTER)
+        self.tree4.column("seat", width=110, anchor=tk.CENTER)
+        self.tree4.column("xp", width=75, anchor=tk.CENTER)
+        self.tree4.column("sp", width=75, anchor=tk.CENTER)
+        self.tree4.column("profit", width=100, anchor=tk.E)
+        self.tree4.column("roi", width=100, anchor=tk.E)
         
         scrollbar4 = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree4.yview)
         self.tree4.configure(yscroll=scrollbar4.set)
@@ -535,12 +563,16 @@ class ProfitAnalyzerApp:
                     df_csv = pd.read_csv(io.StringIO(content), skiprows=skip_rows)
                     df_csv.columns = [str(c).replace(' ', '').replace('\n', '').lower() for c in df_csv.columns]
                     
-                    # ==== 檢查這是不是一份包含飛機資訊的資料表 (找 XP 與 價格) ====
+                    # ==== 檢查這是不是一份包含飛機資訊的資料表 (找 XP、價格與 SP 基準參數) ====
                     col_code_xp = next((c for c in df_csv.columns if 'icaocode' in c or '機型代碼' in c), None)
                     col_xp_val = next((c for c in df_csv.columns if 'lv.10' in c or 'xp' in c), None)
                     col_price_val = next((c for c in df_csv.columns if 'unitprice' in c or '飛機的價格' in c), None)
+                    col_load_type = next((c for c in df_csv.columns if 'loadtype' in c), None)
+                    col_max_seats = next((c for c in df_csv.columns if 'maximumseats' in c), None)
+                    col_cargo = next((c for c in df_csv.columns if 'cargo(kg)' in c or 'cargo' in c), None)
+                    col_handling_time = next((c for c in df_csv.columns if 'handlingtime' in c), None)
                     
-                    if col_code_xp and (col_xp_val or col_price_val):
+                    if col_code_xp and (col_xp_val or col_price_val or (col_load_type and col_handling_time)):
                         for _, row in df_csv.iterrows():
                             ac_code = str(row[col_code_xp]).strip()
                             # 儲存 XP
@@ -555,6 +587,42 @@ class ProfitAnalyzerApp:
                                 price_cleaned = re.sub(r'[^0-9]', '', price_str)
                                 if price_cleaned:
                                     self.price_dict[ac_code] = int(price_cleaned)
+                            # 儲存與預先計算 SP 的基準參數 (base_sp)
+                            # 客機: 0.457145 * (Maximum Seats + 0.171 * (Handling Time (s)) + 6.96837)
+                            # 貨機: 0.00466658 * (Cargo (kg) + 15.4 * (Handling Time (s)) + 10.1115)
+                            if col_load_type and col_handling_time:
+                                try:
+                                    l_type = str(row[col_load_type]).strip().lower()
+                                    ht_str = str(row[col_handling_time]).strip()
+                                    ht_sec = 0
+                                    if ':' in ht_str:
+                                        ht_parts = ht_str.split(':')
+                                        ht_sec = int(ht_parts[0]) * 60 + int(ht_parts[1])
+                                    
+                                    m_seats = 0.0
+                                    if col_max_seats and pd.notna(row[col_max_seats]):
+                                        clean_ms = re.sub(r'[^0-9.]', '', str(row[col_max_seats]))
+                                        if clean_ms: m_seats = float(clean_ms)
+                                        
+                                    cargo_val = 0.0
+                                    if col_cargo and pd.notna(row[col_cargo]):
+                                        clean_cg = re.sub(r'[^0-9.]', '', str(row[col_cargo]))
+                                        if clean_cg: cargo_val = float(clean_cg)
+                                        
+                                    if 'cargo' in l_type:
+                                        base_sp = 0.00466658 * (cargo_val + 15.4 * ht_sec + 10.1115)
+                                    else:
+                                        base_sp = 0.457145 * (m_seats + 0.171 * ht_sec + 6.96837)
+                                        
+                                    self.sp_dict[ac_code] = {
+                                        'base_sp': base_sp,
+                                        'load_type': l_type,
+                                        'seats': m_seats,
+                                        'cargo': cargo_val,
+                                        'ht_sec': ht_sec
+                                    }
+                                except Exception:
+                                    pass
                         continue # 處理完後跳過，不當作航線處理
                     
                     # ==== 檢查這是不是一般的航線利潤表 ====
@@ -632,6 +700,7 @@ class ProfitAnalyzerApp:
             self.db = pd.DataFrame(columns=['hub', 'dest', 'aircraft', 'dist', 'profit', 'e', 'b', 'f'])
             self.xp_dict = {}
             self.price_dict = {}
+            self.sp_dict = {}
             self.update_filters()
             self.apply_filters()
             self.apply_tab2_filters()
@@ -846,7 +915,7 @@ class ProfitAnalyzerApp:
             if col == "profit":
                 try: return int(re.sub(r'[^\d-]', '', val))
                 except: return 0
-            if col in ["dist", "rank", "xp"]:
+            if col in ["dist", "rank", "xp", "sp"]:
                 try: return int(val)
                 except: return 0
             return val.lower()
@@ -898,6 +967,7 @@ class ProfitAnalyzerApp:
             self.lbl_top_profit.config(text="💰 淨利: $0")
             self.lbl_top_seat.config(text="💺 座位: -/-/-")
             self.lbl_top_xp.config(text=f"✨ T10 XP: {ac_xp}")
+            self.lbl_top_sp.config(text="⭐ 預估 SP: -")
             self.lbl_top_roi.config(text="📈 ROI: -")
             return
 
@@ -906,6 +976,14 @@ class ProfitAnalyzerApp:
         self.lbl_top_profit.config(text=f"💰 淨利: ${int(best['profit']):,}")
         self.lbl_top_seat.config(text=f"💺 座位: {best['e'] or 0} / {best['b'] or 0} / {best['f'] or 0}")
         self.lbl_top_xp.config(text=f"✨ T10 XP: {ac_xp}")
+        
+        # 計算最高利潤航線的預估 SP
+        ac_sp_base = self.sp_dict.get(selected_ac)
+        best_sp = calculate_estimated_sp(ac_sp_base, best['dist'])
+        if best_sp is not None:
+            self.lbl_top_sp.config(text=f"⭐ 預估 SP: {best_sp:,}")
+        else:
+            self.lbl_top_sp.config(text="⭐ 預估 SP: -")
         
         # 計算 ROI 並更新頂部標籤
         price = self.price_dict.get(selected_ac)
@@ -920,6 +998,10 @@ class ProfitAnalyzerApp:
             seat_str = f"{row['e'] or 0} / {row['b'] or 0} / {row['f'] or 0}"
             profit_str = f"${int(row['profit']):,}"
             
+            # 計算該航線預估 SP
+            row_sp = calculate_estimated_sp(ac_sp_base, row['dist'])
+            sp_str = f"{row_sp:,}" if row_sp is not None else "-"
+            
             # 計算該列的 ROI
             if price and price > 0:
                 roi_val = (row['profit'] / price) * 100
@@ -927,7 +1009,7 @@ class ProfitAnalyzerApp:
             else:
                 roi_str = "-"
             
-            self.tree.insert("", tk.END, values=(i + 1, dest_str, row['dist'], seat_str, ac_xp, profit_str, roi_str))
+            self.tree.insert("", tk.END, values=(i + 1, dest_str, row['dist'], seat_str, ac_xp, sp_str, profit_str, roi_str))
 
     # ================= Tab 2 邏輯 =================
     def on_tab2_hub_change(self, event=None):
@@ -996,6 +1078,11 @@ class ProfitAnalyzerApp:
             profit_str = f"${int(profit_val):,}"
             xp_val = self.xp_dict.get(ac, '-')
             
+            # 計算預估 SP (依該機型規格與當前航線距離計算)
+            ac_sp_base = self.sp_dict.get(ac)
+            sp_val = calculate_estimated_sp(ac_sp_base, row['dist'])
+            sp_str = f"{sp_val:,}" if sp_val is not None else "-"
+            
             # 計算報酬率 (ROI = 淨利潤 / 飛機價格 * 100)
             price = self.price_dict.get(ac)
             if price and price > 0:
@@ -1004,7 +1091,7 @@ class ProfitAnalyzerApp:
             else:
                 roi_str = "-"
             
-            self.tree2.insert("", tk.END, values=(i + 1, ac, row['dist'], seat_str, xp_val, profit_str, roi_str))
+            self.tree2.insert("", tk.END, values=(i + 1, ac, row['dist'], seat_str, xp_val, sp_str, profit_str, roi_str))
 
     # ================= Tab 4 邏輯 =================
     def apply_tab4_filters(self):
@@ -1038,6 +1125,11 @@ class ProfitAnalyzerApp:
             profit_str = f"${int(profit_val):,}"
             xp_val = self.xp_dict.get(ac, '-')
             
+            # 計算預估 SP (依該機型規格與當前航線距離計算)
+            ac_sp_base = self.sp_dict.get(ac)
+            sp_val = calculate_estimated_sp(ac_sp_base, row['dist'])
+            sp_str = f"{sp_val:,}" if sp_val is not None else "-"
+            
             # 計算報酬率 (ROI)
             price = self.price_dict.get(ac)
             if price and price > 0:
@@ -1046,7 +1138,7 @@ class ProfitAnalyzerApp:
             else:
                 roi_str = "-"
             
-            self.tree4.insert("", tk.END, values=(i + 1, row['hub'], ac, row['dist'], seat_str, xp_val, profit_str, roi_str))
+            self.tree4.insert("", tk.END, values=(i + 1, row['hub'], ac, row['dist'], seat_str, xp_val, sp_str, profit_str, roi_str))
 
 if __name__ == "__main__":
     root = tk.Tk()
