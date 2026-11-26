@@ -16,7 +16,7 @@ import base64
 # ==========================================
 # 0. 版本更新配置
 # ==========================================
-CURRENT_VERSION = "1.3.0"
+CURRENT_VERSION = "1.4.0"
 VERSION_URL = "https://raw.githubusercontent.com/F1026120/WOA-Profit-Analyzer/refs/heads/main/version.txt"
 # GitHub API 路徑 (可繞過 raw.githubusercontent.com 的 Fastly CDN 300 秒快取，即時取得最新內容)
 GITHUB_API_VERSION_URL = "https://api.github.com/repos/F1026120/WOA-Profit-Analyzer/contents/version.txt"
@@ -28,8 +28,8 @@ RELEASE_BASE_URL = "https://github.com/F1026120/WOA-Profit-Analyzer/releases/dow
 # 1. 預載資料與常數
 # ==========================================
 PLAYABLE_AIRPORTS = {
-    'INN', 'BRI', 'PRG', 'IAD', 'NGO', 'SAN', 'MCT', 'LEJ', 
-    'SXM', 'LHR', 'SYD', 'BKK', 'MSY', 'GRU', 'SCL', 'CNN', 'HKG','ZRH'
+    'INN', 'BRI', 'PRG', 'IAD', 'NGO', 'SAN', 'MCT', 'LEJ',
+    'SXM', 'LHR', 'SYD', 'BKK', 'MSY', 'GRU', 'SCL', 'CNN', 'HKG', 'ZRH', 'YVR'
 }
 
 INITIAL_DATA = [
@@ -595,9 +595,14 @@ class ProfitAnalyzerApp:
                                     l_type = str(row[col_load_type]).strip().lower()
                                     ht_str = str(row[col_handling_time]).strip()
                                     ht_sec = 0
-                                    if ':' in ht_str:
-                                        ht_parts = ht_str.split(':')
-                                        ht_sec = int(ht_parts[0]) * 60 + int(ht_parts[1])
+                                    # 支援 HH:MM:SS (含 JS Date 字串如 "Sat Dec 30 1899 00:57:51 GMT+0800 ...") 與 MM:SS 格式
+                                    m_hms = re.search(r'(\d{1,2}):(\d{2}):(\d{2})', ht_str)
+                                    if m_hms:
+                                        ht_sec = int(m_hms.group(1)) * 3600 + int(m_hms.group(2)) * 60 + int(m_hms.group(3))
+                                    else:
+                                        m_ms = re.search(r'(\d+):(\d{2})', ht_str)
+                                        if m_ms:
+                                            ht_sec = int(m_ms.group(1)) * 60 + int(m_ms.group(2))
                                     
                                     m_seats = 0.0
                                     if col_max_seats and pd.notna(row[col_max_seats]):
@@ -909,16 +914,28 @@ class ProfitAnalyzerApp:
         
         # 轉換數值以便正確排序
         def convert_val(val):
+            if val is None:
+                return 0
+            val_str = str(val).strip()
             if col == "roi":
-                try: return float(val.replace('%', ''))
-                except: return 0.0
-            if col == "profit":
-                try: return int(re.sub(r'[^\d-]', '', val))
-                except: return 0
-            if col in ["dist", "rank", "xp", "sp"]:
-                try: return int(val)
-                except: return 0
-            return val.lower()
+                try: 
+                    return float(val_str.replace('%', '').replace(',', ''))
+                except: 
+                    return 0.0
+            if col in ["profit", "sp"]:
+                # 去除貨幣符號、千分位逗號等非數字字元後轉為整數
+                cleaned = re.sub(r'[^\d-]', '', val_str)
+                try: 
+                    return int(cleaned) if cleaned else 0
+                except: 
+                    return 0
+            if col in ["dist", "rank", "xp"]:
+                cleaned = re.sub(r'[^\d-]', '', val_str)
+                try: 
+                    return int(cleaned) if cleaned else 0
+                except: 
+                    return 0
+            return val_str.lower()
 
         l.sort(key=lambda t: convert_val(t[0]), reverse=reverse)
 

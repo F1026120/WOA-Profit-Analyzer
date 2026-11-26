@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Version](https://img.shields.io/badge/Version-1.3.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-1.4.0-orange.svg)
 
 ## ✨ 核心功能
 
@@ -18,6 +18,10 @@
 *   **🔔 新版本提醒與手動下載**：啟動時在背景檢查 GitHub 最新版本，若有更新將在介面顯示顯眼的下載按鈕，由玩家主動點擊下載，不再強迫自動更新。
 
 ## 📋 更新日誌 (Changelog)
+
+### v1.4.0
+*   ✨ **新增玩家機場**：
+    *   新增玩家可玩機場 **YVR** (溫哥華國際機場)。
 
 ### v1.3.0
 *   ✨ **新增預估 SP (Special Points) 試算功能**：
